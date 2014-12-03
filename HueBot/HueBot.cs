@@ -1,11 +1,14 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Configuration;
-using System.Diagnostics;
+using System.Text.RegularExpressions;
 using agsXMPP;
 using agsXMPP.protocol.client;
 using agsXMPP.protocol.iq.roster;
 using agsXMPP.protocol.x.muc;
+using agsXMPP.Xml.Dom;
+using HipChat.Net;
+using HipChat.Net.Http;
 
 namespace HueBot
 {
@@ -13,6 +16,18 @@ namespace HueBot
   {
     private static XmppClientConnection _client;
     private static Dictionary<string, string> _roster = new Dictionary<string, string>(20);
+    private static readonly string HipchatGroupId = ConfigurationManager.AppSettings["HipchatGroupId"];
+    private static readonly Regex RoomRegex = new Regex(ConfigurationManager.AppSettings["RoomRegex"]);
+    private static readonly Regex IgnoreUserRegex = new Regex(ConfigurationManager.AppSettings["IgnoreUserRegex"]);
+    private static readonly string ConferenceServer = ConfigurationManager.AppSettings["ConferenceServer"];
+    private static readonly Hue Hue = new Hue();
+    private static readonly HipChatClient HipChatApiClient = new HipChatClient(new ApiConnection(new Credentials("ltxVo6YZTSYINPdnU3V8T0olBZUI1VOYZFjUjp3N")));
+    private static readonly string Resource = ConfigurationManager.AppSettings["Resource"];
+    private static readonly string Server = ConfigurationManager.AppSettings["Server"];
+    private static readonly string User = ConfigurationManager.AppSettings["User"];
+    private static readonly string Password = ConfigurationManager.AppSettings["Password"];
+    private static readonly string RoomNick = ConfigurationManager.AppSettings["RoomNick"];
+    private static List<string> JoinedRooms = new List<string>();
 
     public void Stop()
     {
@@ -20,56 +35,77 @@ namespace HueBot
 
     public void Start()
     {
-      _client = new XmppClientConnection(ConfigurationManager.AppSettings["Server"]) {AutoResolveConnectServer = false};
-
-      //_client.ConnectServer = "talk.google.com"; //necessary if connecting to Google Talk
-
-      _client.OnLogin += xmpp_OnLogin;
-      _client.OnMessage += xmpp_OnMessage;
-      _client.OnError += _client_OnError;
+      _client = new XmppClientConnection(Server) {AutoResolveConnectServer = false};
+      _client.OnLogin += OnLogin;
+      _client.OnMessage += OnMessage;
+      _client.OnError += OnError;
 
       _client.KeepAlive = true;
       _client.KeepAliveInterval = 60;
 
       Console.WriteLine("Connecting...");
-      _client.Resource = ConfigurationManager.AppSettings["Resource"];
-      _client.Open(ConfigurationManager.AppSettings["User"], ConfigurationManager.AppSettings["Password"]);
+      _client.Resource = Resource;
+      _client.Open(User, Password);
+      _client.OnAuthError += OnAuthError;
+      _client.OnXmppConnectionStateChanged += OnXmppConnectionStateChanged;
       Console.WriteLine("Connected.");
 
-      _client.OnRosterStart += _client_OnRosterStart;
-      _client.OnRosterItem += _client_OnRosterItem;
+      _client.OnRosterStart += OnRosterStart;
+      _client.OnRosterItem += OnRosterItem;
     }
 
-    private static void _client_OnError(object sender, Exception ex)
+    public void OnXmppConnectionStateChanged(object sender, XmppConnectionState state)
+    {
+      Console.WriteLine("Connection state change: " + state);
+    }
+
+    private void OnAuthError(object sender, Element element)
+    {
+      Console.WriteLine("Auth error: " + element);
+    }
+
+    private static void OnError(object sender, Exception ex)
     {
       Console.WriteLine("Exception: " + ex);
     }
 
-    private static void _client_OnRosterStart(object sender)
+    private static void OnRosterStart(object sender)
     {
-      _roster = new Dictionary<string, string>(20);
+      _roster = new Dictionary<string, string>();
     }
 
-    private static void _client_OnRosterItem(object sender, RosterItem item)
+    private static void OnRosterItem(object sender, RosterItem item)
     {
       if (!_roster.ContainsKey(item.Jid.User))
         _roster.Add(item.Jid.User, item.Name);
     }
 
-    private static void xmpp_OnLogin(object sender)
+    private static void OnLogin(object sender)
     {
       var mucManager = new MucManager(_client);
+      JoinRooms(mucManager);
+    }
 
-      string[] rooms = ConfigurationManager.AppSettings["Rooms"].Split(',');
+    private static void JoinRooms(MucManager mucManager)
+    {
+      var rooms = HipChatApiClient.Rooms.GetAllAsync();
 
-      foreach (string room in rooms)
+      rooms.Wait();
+
+      foreach (var room in rooms.Result.Model.Items)
       {
-        var jid = new Jid(room + "@" + ConfigurationManager.AppSettings["ConferenceServer"]);
-        mucManager.JoinRoom(jid, ConfigurationManager.AppSettings["RoomNick"]);
+        string jabberRoomId = HipchatGroupId + "_" + room.Name.ToLower().Replace("'", "").Replace(" ", "_") + "@" +
+                              ConferenceServer;
+        if (RoomRegex.IsMatch(jabberRoomId))
+        {
+          JoinedRooms.Add(jabberRoomId);
+          mucManager.JoinRoom(new Jid(jabberRoomId), RoomNick);
+          Console.WriteLine("Joined " + jabberRoomId);
+        }
       }
     }
 
-    private static void xmpp_OnMessage(object sender, Message msg)
+    private static void OnMessage(object sender, Message msg)
     {
       if (!String.IsNullOrEmpty(msg.Body))
       {
@@ -89,25 +125,18 @@ namespace HueBot
           user = msg.From.Resource;
         }
 
-        if (user == ConfigurationManager.AppSettings["RoomNick"])
+        if (IgnoreUserRegex.IsMatch(user)
+            || user == RoomNick)
+        {
           return;
+        }
 
         var line = new ParsedLine(msg.Body.Trim(), user);
 
-        switch (line.Command)
+        string output = Hue.Evaluate(line);
+        if (!string.IsNullOrEmpty(output))
         {
-          case "close":
-            SendMessage(msg.From, "I'm a quitter...", msg.Type);
-            Environment.Exit(1);
-            return;
-          default:
-            var hue = new Hue();
-            string output = hue.Evaluate(line);
-            if (!string.IsNullOrEmpty(output))
-            {
-              SendMessage(msg.From, output, msg.Type);
-            }
-            break;
+          SendMessage(msg.From, output, msg.Type);
         }
       }
     }
@@ -116,7 +145,10 @@ namespace HueBot
     {
       if (text == null) return;
 
-      _client.Send(new Message(to, type, text));
+      /*foreach (var r in JoinedRooms)
+      {
+        _client.Send(new Message(r, MessageType.groupchat, text));
+      }*/
     }
   }
 }
