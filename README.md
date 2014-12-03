@@ -1,0 +1,1 @@
+HueBot is an XMPP bot for controlling Philips Hue lights.  It integrates easily with HipChat.
