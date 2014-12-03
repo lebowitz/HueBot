@@ -2,7 +2,6 @@
 using System.Collections.Generic;
 using System.Configuration;
 using System.Diagnostics;
-using System.Reactive;
 using agsXMPP;
 using agsXMPP.protocol.client;
 using agsXMPP.protocol.iq.roster;
@@ -118,20 +117,6 @@ namespace HueBot
       if (text == null) return;
 
       _client.Send(new Message(to, type, text));
-    }
-
-    public static void SendSequence(Jid to, IObservable<string> messages, MessageType type)
-    {
-      if (messages == null)
-      {
-        return;
-      }
-
-      var observer = Observer.Create<string>(
-        msg => SendMessage(to, msg, type),
-        exception => Trace.TraceError(exception.ToString()));
-
-      messages.Subscribe(observer);
     }
   }
 }
