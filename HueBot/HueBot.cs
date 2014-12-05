@@ -89,7 +89,9 @@ namespace HueBot
     private static void JoinRooms(MucManager mucManager)
     {
       var rooms = HipChatApiClient.Rooms.GetAllAsync();
+
       rooms.Wait();
+
       foreach (var room in rooms.Result.Model.Items)
       {
         string jabberRoomId = HipchatGroupId + "_" + room.Name.ToLower().Replace("'", "").Replace(" ", "_") + "@" +
@@ -143,10 +145,10 @@ namespace HueBot
     {
       if (text == null) return;
 
-      /*foreach (var r in JoinedRooms)
+      foreach (var r in JoinedRooms)
       {
         _client.Send(new Message(r, MessageType.groupchat, text));
-      }*/
+      }
     }
   }
 }
