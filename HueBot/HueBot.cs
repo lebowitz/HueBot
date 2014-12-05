@@ -21,13 +21,13 @@ namespace HueBot
     private static readonly Regex IgnoreUserRegex = new Regex(ConfigurationManager.AppSettings["IgnoreUserRegex"]);
     private static readonly string ConferenceServer = ConfigurationManager.AppSettings["ConferenceServer"];
     private static readonly Hue Hue = new Hue();
-    private static readonly HipChatClient HipChatApiClient = new HipChatClient(new ApiConnection(new Credentials("ltxVo6YZTSYINPdnU3V8T0olBZUI1VOYZFjUjp3N")));
+    private static readonly HipChatClient HipChatApiClient = new HipChatClient(new ApiConnection(new Credentials(ConfigurationManager.AppSettings["HipchatApiToken"])));
     private static readonly string Resource = ConfigurationManager.AppSettings["Resource"];
     private static readonly string Server = ConfigurationManager.AppSettings["Server"];
     private static readonly string User = ConfigurationManager.AppSettings["User"];
     private static readonly string Password = ConfigurationManager.AppSettings["Password"];
     private static readonly string RoomNick = ConfigurationManager.AppSettings["RoomNick"];
-    private static List<string> JoinedRooms = new List<string>();
+    private static readonly List<string> JoinedRooms = new List<string>();
 
     public void Stop()
     {
@@ -89,9 +89,7 @@ namespace HueBot
     private static void JoinRooms(MucManager mucManager)
     {
       var rooms = HipChatApiClient.Rooms.GetAllAsync();
-
       rooms.Wait();
-
       foreach (var room in rooms.Result.Model.Items)
       {
         string jabberRoomId = HipchatGroupId + "_" + room.Name.ToLower().Replace("'", "").Replace(" ", "_") + "@" +
